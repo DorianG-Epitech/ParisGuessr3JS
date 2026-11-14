@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#f7f7f4">
+  <title>Paris Guessr — version Three.js</title>
+  <link rel="icon" href="data:,">
+  <script type="module" crossorigin src="./assets/index-CH3JzU4D.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BaSj9OZR.css">
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="menu" class="screen">
+    <h1>Paris Guessr</h1>
+    <p>Tu atterris dans une rue de Paris. Retrouve où tu es sur la carte.</p>
+    <p class="sub">5 manches · 5 000 points max par manche · version Three.js</p>
+    <button id="play" class="btn" disabled>Chargement…</button>
+    <p class="credits">Données : IGN BD TOPO® &amp; RGE ALTI® (Licence Ouverte Etalab 2.0) · Arbres : Ville de Paris, opendata.paris.fr (ODbL).
+      Aucune texture : formes 3D réelles en rendu contour.</p>
+  </div>
+  <div id="loading" class="screen hidden"><h2 id="loadTitle">Manche 1/5</h2><p id="loadText">Atterrissage dans une rue de Paris…</p></div>
+  <div id="hud" class="hidden">
+    <div id="info" class="panel"><div id="hudRound">Manche 1/5</div><div id="hudScore">Score : 0</div></div>
+    <div id="compass" class="panel"><div id="compassInner"></div><div id="compassTick"></div></div>
+    <button id="backBtn" class="btn light small">Départ</button>
+    <button id="mapBtn" class="btn">CARTE</button>
+    <div id="hint"></div>
+    <div id="lockHint">Clique pour regarder autour de toi</div>
+    <div id="joy"><div id="joyKnob"></div></div>
+  </div>
+  <div id="mapview" class="hidden">
+    <canvas id="mapc"></canvas>
+    <button id="zoomIn" class="btn light sq">+</button><button id="zoomOut" class="btn light sq">−</button>
+    <div id="resinfo" class="panel hidden"><div id="resPlace"></div><div id="resScore"></div></div>
+    <div id="mapbar">
+      <button id="closeMap" class="btn light">Retour</button>
+      <div id="mapHint"></div>
+      <button id="validate" class="btn" disabled>Valider</button>
+      <button id="next" class="btn hidden">Manche suivante</button>
+    </div>
+  </div>
+  <div id="final" class="screen hidden">
+    <h2>Partie terminée</h2>
+    <div id="total"></div>
+    <ol id="recap"></ol>
+    <button id="replay" class="btn">REJOUER</button>
+  </div>
+  <div id="rotate" class="screen hidden"><div class="phone"></div><p>Tourne ton téléphone en mode paysage</p></div>
+</body>
+</html>
