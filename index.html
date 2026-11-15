@@ -16,30 +16,41 @@
     <p>Tu atterris dans une rue de Paris. Retrouve où tu es sur la carte.</p>
     <p class="sub">5 manches · 5 000 points max par manche · version Three.js</p>
     <button id="play" class="btn" disabled>Chargement…</button>
-    <p class="credits">Données : IGN BD TOPO® &amp; RGE ALTI® (Licence Ouverte Etalab 2.0) · Arbres : Ville de Paris, opendata.paris.fr (ODbL).
+    <p class="credits">Données : IGN BD TOPO® &amp; RGE ALTI® (Licence Ouverte Etalab 2.0) · Arbres : Ville de Paris, opendata.paris.fr (ODbL) · Métro/RER : Île-de-France Mobilités (Licence Ouverte).
       Aucune texture : formes 3D réelles en rendu contour.</p>
   </div>
   <div id="loading" class="screen hidden"><h2 id="loadTitle">Manche 1/5</h2><p id="loadText">Atterrissage dans une rue de Paris…</p></div>
   <div id="hud" class="hidden">
-    <div id="info" class="panel"><div id="hudRound">Manche 1/5</div><div id="hudScore">Score : 0</div></div>
+    <div id="leftCol">
+    <div id="info" class="panel"><div id="hudRound">Manche 1/5</div><div id="hudScore">Score : 0</div><div id="hudArr" class="hidden"></div></div>
+    <div id="hints">
+      <button id="hMetro" class="btn light hintb" data-h="metro"><b>Lignes métro/RER</b><span>−1 500 pts</span></button>
+      <button id="hArr" class="btn light hintb" data-h="arr"><b>Arrondissement</b><span>score ÷ 2</span></button>
+      <button id="hAir" class="btn light hintb" data-h="air"><b>Prendre de la hauteur</b><span>score ÷ 2</span></button>
+    </div>
+    </div>
     <div id="compass" class="panel"><div id="compassInner"></div><div id="compassTick"></div></div>
-    <button id="backBtn" class="btn light small">Départ</button>
-    <button id="mapBtn" class="btn">CARTE</button>
+    <div id="topRight">
+      <button id="backBtn" class="btn light small">Départ</button>
+      <button id="nextRoam" class="btn small hidden">Manche suivante</button>
+    </div>
     <div id="hint"></div>
     <div id="lockHint">Clique pour regarder autour de toi</div>
     <div id="joy"><div id="joyKnob"></div></div>
   </div>
-  <div id="mapview" class="hidden">
+  <div id="mapview" class="hidden mini">
     <canvas id="mapc"></canvas>
-    <button id="zoomIn" class="btn light sq">+</button><button id="zoomOut" class="btn light sq">−</button>
-    <div id="resinfo" class="panel hidden"><div id="resPlace"></div><div id="resScore"></div></div>
+    <div id="mapTools"><button id="mapExpand" class="btn light sq" title="Agrandir (M)">⤢</button><button id="zoomIn" class="btn light sq">+</button><button id="zoomOut" class="btn light sq">−</button></div>
+    <div id="resinfo" class="panel hidden"><div id="resPlace"></div><div id="resScore"></div><div id="resCalc"></div></div>
     <div id="mapbar">
-      <button id="closeMap" class="btn light">Retour</button>
+      <button id="closeMap" class="btn light">Réduire</button>
       <div id="mapHint"></div>
-      <button id="validate" class="btn" disabled>Valider</button>
+      <button id="validate" class="btn" disabled>Deviner</button>
+      <button id="roam" class="btn light hidden">Se déplacer</button>
       <button id="next" class="btn hidden">Manche suivante</button>
     </div>
   </div>
+  <div id="confirm" class="screen hidden"><div class="panel box"><p id="confirmText"></p><div class="row"><button id="confirmNo" class="btn light">Annuler</button><button id="confirmYes" class="btn">Utiliser</button></div></div></div>
   <div id="final" class="screen hidden">
     <h2>Partie terminée</h2>
     <div id="total"></div>
