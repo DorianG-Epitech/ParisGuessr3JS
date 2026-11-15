@@ -27,6 +27,21 @@ const ICO = [[-1, T, 0], [1, T, 0], [-1, -T, 0], [1, -T, 0], [0, -1, T], [0, 1, 
   .map(v => { const l = Math.hypot(...v); return v.map(x => x / l); });
 const ICOT = [0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8, 3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1];
 
+// world-frame polygons (landmarks.json "excl") whose buildings are replaced by hand-built models
+let EXCL = [];
+export function setExclusions(polys) {
+  EXCL = polys.map(p => { const xs = p.map(q => q[0]), zs = p.map(q => q[1]); return { p, x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) }; });
+}
+function excluded(ring, origin) {
+  let x = 0, z = 0; for (const q of ring) { x += q[0]; z += q[1]; } x = x / ring.length + origin.x; z = z / ring.length + origin.z;
+  for (const e of EXCL) {
+    if (x < e.x0 || x > e.x1 || z < e.z0 || z > e.z1) continue;
+    let inside = false; const p = e.p;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > z) !== (p[j][1] > z) && x < (p[j][0] - p[i][0]) * (z - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) inside = !inside;
+    if (inside) return true;
+  }
+  return false;
+}
 export function buildTile(buffer) {
   const d = new DataView(buffer); let o = 4;
   const f32 = () => { const v = d.getFloat32(o, true); o += 4; return v; };
@@ -75,14 +90,17 @@ export function buildTile(buffer) {
     F.i.push(a, c, e, a, e, b);
   }
 
-  // ---- prisms (buildings + attic storeys)
+  // ---- prisms (buildings + attic storeys); footprints replaced by hand-built landmarks are skipped
   const np = i32();
   for (let p = 0; p < np; p++) {
     const kind = u8(), z0 = u16() / 100, z1 = u16() / 100, nr = u8();
+    const rings = [];
+    for (let q = 0; q < nr; q++) { const n = u16(); const ring = []; for (let i = 0; i < n; i++) { const x = i16() / 10, z = i16() / 10; ring.push([x, z]); } rings.push(ring); }
+    const nt = u16(); const tris = []; for (let i = 0; i < nt * 3; i++) tris.push(u16());
+    if (EXCL.length && rings.length && excluded(rings[0], origin)) continue;
     const all = []; const wc = kind === 0 ? cWall : cAttic, rc = kind === 0 ? cRoof : cAtticRoof;
-    for (let q = 0; q < nr; q++) {
-      const n = u16(); const ring = [];
-      for (let i = 0; i < n; i++) { const x = i16() / 10, z = i16() / 10; ring.push([x, z]); }
+    for (const ring of rings) {
+      const n = ring.length;
       all.push(...ring);
       for (let i = 0; i < n; i++) {
         const a = ring[i], b = ring[(i + 1) % n], pr = ring[(i + n - 1) % n];
@@ -104,9 +122,9 @@ export function buildTile(buffer) {
           line([a[0], kind === 0 ? Math.max(z0, ground(a[0], a[1])) : z0, a[1]], [a[0], z1, a[1]]);
       }
     }
-    const nt = u16(); const base = F.count;
+    const base = F.count;
     for (const v of all) vert(F, v[0], z1, v[1], 0, 1, 0, rc);
-    for (let i = 0; i < nt * 3; i++) F.i.push(base + u16());
+    for (const ix of tris) F.i.push(base + ix);
   }
 
   // ---- roads: ribbons draped on the terrain (subdivided across), bridges at their own deck altitude

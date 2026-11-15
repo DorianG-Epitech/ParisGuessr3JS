@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { World, loadWorld, arrName } from './world.js';
 import { Streamer } from './streamer.js';
 import { U } from './shaders.js';
+import { Landmarks } from './landmarks.js';
+import { setExclusions } from './tilebuilder.js';
 
 THREE.ColorManagement.enabled = false;   // flat palette written as-is (like the Unity Gamma build)
 const $ = id => document.getElementById(id);
@@ -22,7 +24,8 @@ const scene = new THREE.Scene();
 const root = new THREE.Group(); root.scale.set(1, 1, -1); scene.add(root);   // data frame x=E, z=N -> three.js z=-N
 const camera = new THREE.PerspectiveCamera(70, 1, 0.15, 360); camera.rotation.order = 'YXZ';
 const fogEnd = touch ? 270 : 330;
-U.fogRange.value.set(60, fogEnd); camera.far = fogEnd + 25;
+U.fogRange.value.set(60, fogEnd); camera.far = 2700;   // tall landmarks (Eiffel tower...) stay visible far beyond the street fog
+let landmarks = null;
 const streamer = new Streamer(root, BASE);
 streamer.loadRadius = touch ? 340 : 420; streamer.unloadRadius = streamer.loadRadius + 200;
 function resize() {
@@ -60,6 +63,7 @@ function updatePlayer(dt) {
   for (let i = 0; i < steps; i++) {
     let nx = P.x + dx / steps, nz = P.z + dz / steps;
     [nx, nz] = streamer.collide(nx, nz, 0.3, P.y);
+    if (landmarks) [nx, nz] = landmarks.collide(nx, nz, 0.3, P.y);
     nx = Math.min(Math.max(nx, 60), World.width - 60); nz = Math.min(Math.max(nz, 60), World.height - 60);
     const g = streamer.groundAt(nx, nz, P.y);
     if (g === null) break;
@@ -258,6 +262,7 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now; const st = (now - stateT) / 1000;
   if (state === 'Explore') streamer.focus = { x: P.x, z: P.z };
   streamer.update();
+  if (landmarks) landmarks.update(streamer.focus.x, streamer.focus.z);
   switch (state) {
     case 'Menu':
       if (!menuSpawn) break;
@@ -296,14 +301,15 @@ function frame(now) {
     renderer.render(scene, camera);
   }
   frames++;
-  if (now - perfT > 5000) { log(`perf ${(frames * 1000 / (now - perfT)).toFixed(1)} fps, draw calls ${renderer.info.render.calls}, tris ${renderer.info.render.triangles}, tiles ${streamer.loadedCount}`); frames = 0; perfT = now; }
+  if (now - perfT > 5000) { log(`perf ${(frames * 1000 / (now - perfT)).toFixed(1)} fps, draw calls ${renderer.info.render.calls}, tris ${renderer.info.render.triangles}, tiles ${streamer.loadedCount}, landmarks ${landmarks ? landmarks.builtCount : 0}`); frames = 0; perfT = now; }
 }
 
 addEventListener('resize', resize);
 resize();
 setState('Menu');
 requestAnimationFrame(frame);
-loadWorld(BASE).then(() => {
+Promise.all([loadWorld(BASE), fetch(BASE + 'landmarks.json').then(r => r.json()).catch(() => [])]).then(([, lm]) => {
+  landmarks = new Landmarks(root, lm, fogEnd); setExclusions(landmarks.exclusions());
   worldReady = true; $('play').disabled = false; $('play').textContent = 'JOUER';
   menuSpawn = World.spawns[(Math.random() * World.spawns.length) | 0];
   streamer.focus = { x: menuSpawn.x, z: menuSpawn.y }; streamer.active = true;

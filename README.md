@@ -56,11 +56,25 @@ Les 953 accès au métro dans l'emprise du jeu sont placés à leur vraie positi
 ![Arbres et métro](screenshots/arbres_metro.png)
 - Toute la géométrie est extrudée dans le navigateur à partir d'empreintes compactes.
 
+## Monuments
+
+Les monuments les plus connus ont un modèle 3D low-poly fait à la main, dans le même style outlined :
+
+- tour Eiffel, Notre-Dame, arc de Triomphe, Sacré-Cœur ;
+- pyramide du Louvre (et les trois petites pyramides), Panthéon, Invalides, Opéra Garnier ;
+- tour Montparnasse, Centre Pompidou, Grand Palais, Madeleine, Saint-Sulpice.
+
+Chaque modèle est construit en code (`src/landmarks.js`) : les volumes principaux reprennent les emprises exactes de la BD TOPO, puis on ajoute les détails (dômes, tours, colonnades, verrières, treillis de la tour Eiffel, tuyaux colorés de Beaubourg…). Les modèles sont placés à leur vraie position, avec la bonne orientation et à l'échelle. Les bâtiments IGN d'origine sont masqués à leur place.
+
+Les modèles sont chargés uniquement quand le joueur s'approche. Les plus hauts (tour Eiffel, Montparnasse, Sacré-Cœur, Invalides, Panthéon, Notre-Dame) restent visibles de loin, en silhouette dans la brume. Aucun nom n'est affiché, pour ne pas donner la réponse.
+
+![Notre-Dame](screenshots/monuments.png)
+
 ## Données
 
 Paris est découpé en 3 073 tuiles de 250 m au format binaire `PGT2`, soit environ 12 Ko gzippés par tuile et 36,5 Mo au total. Chaque tuile contient le relief, les emprises de bâtiments avec leurs hauteurs, les routes avec leurs largeurs et leur classe de couleur, les bordures, les arbres avec leur forme et les accès au métro. Le jeu ne télécharge que les tuiles proches du joueur, dans un rayon de 420 m (340 m sur mobile). Une rue est prête en 0,2 à 0,4 s.
 
-Pour régénérer les tuiles : `python3 tools/build_tiles.py`. Le script a besoin des données brutes IGN, des arbres et des accès métro dans `$PG_DATA`, voir les scripts `fetch_*` du [repo Unity](https://github.com/DorianG-Epitech/ParisGuessr/tree/main/Tools). Les accès métro viennent des jeux IDFM `acces`, `relations-acces` et `zones-d-arrets`. La carte et les points de départ viennent du projet Unity (`tools/prepare_data.py`).
+Pour régénérer les tuiles : `python3 tools/build_tiles.py`. Le script a besoin des données brutes IGN, des arbres et des accès métro dans `$PG_DATA`, voir les scripts `fetch_*` du [repo Unity](https://github.com/DorianG-Epitech/ParisGuessr/tree/main/Tools). Les accès métro viennent des jeux IDFM `acces`, `relations-acces` et `zones-d-arrets`. Les monuments : `tools/landmarks_extract.py` extrait les emprises IGN autour de chaque monument, puis `tools/landmarks_gen.py` produit `public/data/landmarks.json`. La carte et les points de départ viennent du projet Unity (`tools/prepare_data.py`).
 
 ## Développement
 
