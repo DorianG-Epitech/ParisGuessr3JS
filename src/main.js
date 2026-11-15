@@ -1,9 +1,11 @@
 import * as THREE from 'three';
+import { gunzipSync } from 'fflate';
 import { World, loadWorld, arrName } from './world.js';
 import { Streamer } from './streamer.js';
 import { U } from './shaders.js';
 import { Landmarks } from './landmarks.js';
 import { setExclusions } from './tilebuilder.js';
+import { MetroGround } from './metroground.js';
 
 THREE.ColorManagement.enabled = false;   // flat palette written as-is (like the Unity Gamma build)
 const $ = id => document.getElementById(id);
@@ -28,6 +30,7 @@ const fogEnd = touch ? 270 : 330;
 U.fogRange.value.set(60, fogEnd); camera.far = 2700;   // tall landmarks (Eiffel tower...) stay visible far beyond the street fog
 let landmarks = null;
 const streamer = new Streamer(root, BASE);
+const metroG = new MetroGround(streamer);
 streamer.loadRadius = touch ? 340 : 420; streamer.unloadRadius = streamer.loadRadius + 200;
 function resize() {
   const w = innerWidth, h = innerHeight;
@@ -47,6 +50,14 @@ let airOn = false, air = 0;
 function setAir(on) {
   airOn = on; streamer.loadRadius = baseLoad + (on ? 280 : 0); streamer.unloadRadius = streamer.loadRadius + 200;
   P.pitch = on ? 52 : 0; log('aerial ' + (on ? 'on' : 'off')); updateHintUi();
+}
+// back to the start: the start tiles may have been unloaded after a long walk -> stream them back in, then teleport
+let returning = false;
+function goBack() {
+  if (!cur) return;
+  if (airOn) setAir(false);
+  if (teleport(cur.spawn)) { returning = false; log('back to start'); return; }
+  returning = true; streamer.focus = { x: cur.spawn.x, z: cur.spawn.y }; log('back to start: reloading tiles');
 }
 function teleport(s) {
   const g = streamer.groundAt(s.x, s.y, 1e4); if (g === null) return false;
@@ -96,10 +107,13 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (modal) { if (e.key === 'Escape') closeConfirm(false); else if (e.key === 'Enter') closeConfirm(true); return; }
   if (playing()) {
+    if (e.code === 'Space' || e.key === 'Enter') e.preventDefault();   // never let Space/Enter "click" a focused button
+    if (e.repeat) return;
     if (k === 'm') toggleBig();
     else if (e.key === 'Escape' && mapMode !== 'mini') setMapMode('mini');
-    else if (k === 'r' && !airOn) teleport(cur.spawn);
-    else if (state === 'Explore' && (e.code === 'Space' || e.key === 'Enter') && pin) validate();
+    else if (k === 'r' || e.code === 'KeyR') goBack();
+    else if (e.code === 'Space') { if (state === 'Roam' || cur.hints.air) setAir(!airOn); }   // Space = street <-> aerial once the height hint is owned
+    else if (state === 'Explore' && e.key === 'Enter' && pin) validate();
     else if (state === 'Roam' && e.key === 'Enter') nextRound();
   }
   else if (state === 'Result' && e.key === 'Enter') nextRound();
@@ -168,8 +182,8 @@ function updateHintUi() {
   b.querySelector('span').textContent = roam ? 'gratuit' : cur.hints.air ? 'utilisé' : 'score ÷ 2';
   $('hudArr').classList.toggle('hidden', !cur.arr); if (cur.arr) $('hudArr').textContent = arrName(cur.arr);
 }
-for (const h in hintBtn) hintBtn[h].addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); askHint(h); });
-$('confirmYes').addEventListener('click', () => closeConfirm(true)); $('confirmNo').addEventListener('click', () => closeConfirm(false));
+for (const h in hintBtn) hintBtn[h].addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); e.currentTarget.blur(); askHint(h); });
+$('confirmYes').addEventListener('click', e => { e.currentTarget.blur(); closeConfirm(true); }); $('confirmNo').addEventListener('click', e => { e.currentTarget.blur(); closeConfirm(false); });
 
 // ------------------------------------------------------------------ game flow
 let state = '', stateT = 0, worldReady = false, menuSpawn = null, menuPlaced = false, loadT = 0;
@@ -195,7 +209,7 @@ const place = s => (s.street ? s.street + ', ' : '') + arrName(s.arr);
 
 function newGame() { rounds = []; nextRound(true); }
 function nextRound(first) {
-  if (airOn) setAir(false); air = 0;
+  if (airOn) setAir(false); air = 0; returning = false;
   if (!first && rounds.length >= ROUNDS) { showFinal(); return; }
   let s;
   for (let t = 0; t < 200; t++) {
@@ -255,15 +269,15 @@ function showFinal() {
   for (const r of rounds) { const li = document.createElement('li'); const used = Object.keys(r.hints).filter(h => r.hints[h]).map(h => HINTS[h].short);
     li.textContent = `${place(r.spawn)} — ${dist(r.dist)} — ${fmt(r.score)} pts` + (used.length ? ` (indices : ${used.join(', ')})` : ''); $('recap').appendChild(li); }
 }
-const tapBtn = (id, fn) => $(id).addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); fn(); });
+const tapBtn = (id, fn) => $(id).addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); e.currentTarget.blur(); fn(); });
 tapBtn('play', () => worldReady && newGame()); tapBtn('replay', newGame);
-tapBtn('backBtn', () => { if (airOn) setAir(false); teleport(cur.spawn); });
+tapBtn('backBtn', goBack);
 tapBtn('closeMap', () => setMapMode('mini')); tapBtn('validate', validate); tapBtn('next', () => nextRound());
 tapBtn('roam', startRoam); tapBtn('nextRoam', () => nextRound());
 tapBtn('mapExpand', toggleBig);
 tapBtn('zoomIn', () => zoomAt(mapW / 2, mapH / 2, 1.6)); tapBtn('zoomOut', () => zoomAt(mapW / 2, mapH / 2, 1 / 1.6));
 $('hint').textContent = touch ? 'Glisse à gauche pour marcher, à droite pour regarder · touche la carte pour l\'agrandir'
-  : 'Clic : contrôler la vue · ZQSD/WASD : marcher · Maj : courir · M : agrandir la carte · Espace : deviner · R : retour au départ';
+  : 'Clic : contrôler la vue · ZQSD/WASD : marcher · Maj : courir · M : agrandir la carte · Entrée : deviner · Espace : monter/descendre (indice hauteur) · R : retour au départ';
 
 // ------------------------------------------------------------------ map (2D canvas, map image covers the world bbox, north up)
 // modes: 'mini' docked bottom-right during play (CSS :hover enlarges it on desktop), 'big' (M / ⤢, desktop), 'full' (result, or tap on phones), 'hidden'
@@ -290,8 +304,84 @@ const toScreen = (x, y) => [mapW / 2 + (x - mc.x) * mk, mapH / 2 - (y - mc.y) * 
 const toWorld = (sx, sy) => ({ x: mc.x + (sx - mapW / 2) / mk, y: mc.y - (sy - mapH / 2) / mk });
 function clampView() { mc.x = Math.min(Math.max(mc.x, 0), World.width); mc.y = Math.min(Math.max(mc.y, 0), World.height); }
 function zoomAt(sx, sy, f) {
-  const w = toWorld(sx, sy); mk = Math.min(Math.max(mk * f, fitScale() * 0.9), 2);
+  const w = toWorld(sx, sy); mk = Math.min(Math.max(mk * f, fitScale() * 0.9), 3);
   const w2 = toWorld(sx, sy); mc.x += w.x - w2.x; mc.y += w.y - w2.y; clampView(); drawMap();
+}
+// ---- crisp base map: the raster (paris_map.jpg, ~6 m/px) when zoomed out, vector tiles (map/v_X_Y.json.gz, BD TOPO) when zoomed in
+const VEC_K = 0.22;   // device px per metre above which the vector tiles replace the raster
+const MS = { out: '#e8e6e1', paris: '#f6f3ec', green: '#cde4be', water: '#a6cbe6', bld: '#ddd7cd', rail: '#aaaaaf',
+  fill: ['#ffffff', '#ffffff', '#ffffff', '#ffecb4', '#f7d58b'], casing: [null, '#c3beb6', '#b9b4ac', '#d2b982', '#cda05a'], minPx: [0.8, 1.6, 2.2, 3, 3.6] };
+const vtiles = new Map(); let vIndex = null;
+fetch(BASE + 'map/index.json').then(r => r.json()).then(j => { vIndex = j; drawMap(); }).catch(() => {});
+const VEC_B = 0.6;    // device px per metre above which the detailed building footprints are loaded (coarse blocks below)
+// binary layers: varint ring count, per ring varint point count + zigzag varint coords (first absolute, then deltas), decimetres
+function reader(u8) {
+  let o = 0;
+  const vu = () => { let v = 0, s = 1, b; do { b = u8[o++]; v += (b & 127) * s; s *= 128; } while (b & 128); return v; };
+  const zz = () => { const v = vu(); return v % 2 ? -(v + 1) / 2 : v / 2; };
+  const rings = close => { const p = new Path2D(), n = vu(); for (let r = 0; r < n; r++) { const m = vu(); let x = zz(), y = zz(); p.moveTo(x, y);
+    for (let i = 1; i < m; i++) { x += zz(); y += zz(); p.lineTo(x, y); } if (close) p.closePath(); } return p; };
+  return { vu, rings };
+}
+const getGz = url => fetch(url).then(r => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); }).then(b => gunzipSync(new Uint8Array(b)));
+function vtile(tx, ty) {
+  const k = ty * 100 + tx; let t = vtiles.get(k); if (t) return t;
+  t = { ready: false }; vtiles.set(k, t);
+  getGz(`${BASE}map/v_${tx}_${ty}.bin.gz`).then(u8 => { const R = reader(u8);
+      t.P = R.rings(true); t.g = R.rings(true); t.w = R.rings(true); t.b = R.rings(true); t.f = R.rings(false);
+      t.r = []; for (let n = R.vu(), i = 0; i < n; i++) { const c = R.vu(), w = R.vu() / 10; t.r.push({ c, w, p: R.rings(false) }); }
+      t.ready = true; drawMap(); })
+    .catch(() => { t.empty = true; t.ready = true; });
+  return t;
+}
+function vdetail(t, tx, ty) {
+  if (t.bd !== undefined) return t.bd; t.bd = null;
+  getGz(`${BASE}map/b_${tx}_${ty}.bin.gz`).then(u8 => { t.bd = reader(u8).rings(true); drawMap(); }).catch(() => {});
+  return null;
+}
+function drawRaster(c, x0, y0, x1, y1) {
+  if (!(mapImg.complete && mapImg.naturalWidth)) return false;
+  x0 = Math.max(0, x0); x1 = Math.min(World.width, x1); y0 = Math.max(0, y0); y1 = Math.min(World.height, y1); if (x1 <= x0 || y1 <= y0) return true;
+  const iw = mapImg.naturalWidth, ih = mapImg.naturalHeight, [ax, ay] = toScreen(x0, y1), [bx, by] = toScreen(x1, y0);
+  c.imageSmoothingQuality = 'high';
+  c.drawImage(mapImg, x0 / World.width * iw, (1 - y1 / World.height) * ih, (x1 - x0) / World.width * iw, (y1 - y0) / World.height * ih, ax, ay, bx - ax, by - ay);
+  return true;
+}
+function drawBase(c) {
+  const vx0 = mc.x - mapW / 2 / mk, vx1 = mc.x + mapW / 2 / mk, vy0 = mc.y - mapH / 2 / mk, vy1 = mc.y + mapH / 2 / mk;
+  if (!vIndex || mk * mdpr < VEC_K) {
+    if (!drawRaster(c, vx0, vy0, vx1, vy1)) { c.fillStyle = '#555'; c.font = '16px system-ui'; c.fillText('Chargement de la carte…', 12, 24); }
+    return;
+  }
+  const TS = vIndex.tile, u = 10 / mk;   // u: tile units (dm) per CSS px
+  for (let ty = Math.max(0, Math.floor(vy0 / TS)); ty <= Math.min(vIndex.ny - 1, Math.floor(vy1 / TS)); ty++)
+    for (let tx = Math.max(0, Math.floor(vx0 / TS)); tx <= Math.min(vIndex.nx - 1, Math.floor(vx1 / TS)); tx++) {
+      const t = vtile(tx, ty), ox = tx * TS, oy = ty * TS;
+      if (!t.ready || t.empty) { c.setTransform(mdpr, 0, 0, mdpr, 0, 0); drawRaster(c, ox, oy, ox + TS, oy + TS); continue; }
+      c.save();
+      c.setTransform(mdpr * mk / 10, 0, 0, -mdpr * mk / 10, mdpr * (mapW / 2 + (ox - mc.x) * mk), mdpr * (mapH / 2 + (mc.y - oy) * mk));
+      c.beginPath(); c.rect(0, 0, TS * 10, TS * 10); c.clip();
+      c.fillStyle = MS.paris; c.fill(t.P, 'evenodd');
+      c.fillStyle = MS.green; c.fill(t.g, 'evenodd'); c.fillStyle = MS.water; c.fill(t.w, 'evenodd'); c.fillStyle = MS.bld; c.fill((mk * mdpr >= VEC_B && vdetail(t, tx, ty)) || t.b, 'evenodd');
+      c.lineJoin = c.lineCap = 'round';
+      c.strokeStyle = MS.rail; c.lineWidth = 1.6 * u; c.stroke(t.f);
+      const wpx = r => Math.max(r.w * mk, MS.minPx[r.c]);
+      for (const r of t.r) if (MS.casing[r.c]) { c.strokeStyle = MS.casing[r.c]; c.lineWidth = (wpx(r) + 1.6) * u; c.stroke(r.p); }
+      for (const r of t.r) { c.strokeStyle = MS.fill[r.c]; c.lineWidth = wpx(r) * u; c.stroke(r.p); }
+      c.restore();
+    }
+  c.setTransform(mdpr, 0, 0, mdpr, 0, 0);
+  // arrondissement limits (dashed) + labels, drawn crisp on top (the raster has them baked in)
+  c.lineJoin = c.lineCap = 'round';
+  c.beginPath(); for (const a of hintData.arr) for (const r of a.p) pathRing(c, r, true);
+  c.setLineDash([7, 7]); c.lineWidth = 2; c.strokeStyle = 'rgba(140,110,190,.95)'; c.stroke(); c.setLineDash([]);
+  const fs = touch ? 18 : 24; c.font = `700 ${fs}px "DejaVu Sans", system-ui, sans-serif`; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.lineWidth = 4; c.strokeStyle = 'rgba(255,255,255,.85)'; c.fillStyle = 'rgba(110,80,170,.85)';
+  for (const a of hintData.arr) { if (!a.l) continue; const [x, y] = toScreen(a.l[0], a.l[1]); const t = a.a === 1 ? '1er' : a.a + 'e'; c.strokeText(t, x, y); c.fillText(t, x, y); }
+  c.font = `italic 700 ${fs - 6}px "DejaVu Sans", system-ui, sans-serif`;
+  for (const [n, x0, y0] of [['Bois de Boulogne', 2103, 5503], ['Bois de Vincennes', 15873, 2275], ['Seine', 4733, 4255], ['Seine', 11109, 3200]]) {
+    const [x, y] = toScreen(x0, y0); c.fillStyle = n === 'Seine' ? 'rgba(40,90,150,.9)' : 'rgba(60,110,60,.9)'; c.strokeText(n, x, y); c.fillText(n, x, y); }
+  c.textAlign = 'start'; c.textBaseline = 'alphabetic';
 }
 function pathRing(c, r, close) { for (let i = 0; i < r.length; i += 2) { const [x, y] = toScreen(r[i], r[i + 1]); i ? c.lineTo(x, y) : c.moveTo(x, y); } if (close) c.closePath(); }
 function drawMap() {
@@ -299,16 +389,7 @@ function drawMap() {
   if (mapc.width !== Math.round(mapc.clientWidth * mdpr)) sizeMap();
   const c = mctx; c.setTransform(mdpr, 0, 0, mdpr, 0, 0);
   c.fillStyle = '#e8e6e1'; c.fillRect(0, 0, mapW, mapH);
-  if (mapImg.complete && mapImg.naturalWidth) {
-    const x0 = Math.max(0, mc.x - mapW / 2 / mk), x1 = Math.min(World.width, mc.x + mapW / 2 / mk);
-    const y0 = Math.max(0, mc.y - mapH / 2 / mk), y1 = Math.min(World.height, mc.y + mapH / 2 / mk);
-    if (x1 > x0 && y1 > y0) {
-      const iw = mapImg.naturalWidth, ih = mapImg.naturalHeight;
-      const [ax, ay] = toScreen(x0, y1), [bx, by] = toScreen(x1, y0);
-      c.imageSmoothingQuality = 'high';
-      c.drawImage(mapImg, x0 / World.width * iw, (1 - y1 / World.height) * ih, (x1 - x0) / World.width * iw, (y1 - y0) / World.height * ih, ax, ay, bx - ax, by - ay);
-    }
-  } else { c.fillStyle = '#555'; c.font = '16px system-ui'; c.fillText('Chargement de la carte…', 12, 24); }
+  drawBase(c);
   c.lineJoin = c.lineCap = 'round';
   if (cur.hints.arr && cur.arr) {   // arrondissement hint: highlighted boundary
     const a = hintData.arr.find(q => q.a === cur.arr);
@@ -344,7 +425,7 @@ function updateMapUi() {
 }
 const ptrs = new Map(); let dragged = false, pinch = 0;
 mapc.addEventListener('pointerdown', e => { mapc.setPointerCapture(e.pointerId); const r = mapc.getBoundingClientRect();
-  ptrs.set(e.pointerId, { x: e.clientX - r.left, y: e.clientY - r.top, sx: e.clientX, sy: e.clientY, t: performance.now() }); if (ptrs.size === 1) dragged = false; pinch = 0; });
+  ptrs.set(e.pointerId, { x: e.clientX - r.left, y: e.clientY - r.top, sx: e.clientX, sy: e.clientY, t: e.timeStamp }); if (ptrs.size === 1) dragged = false; pinch = 0; });
 mapc.addEventListener('pointermove', e => {
   const p = ptrs.get(e.pointerId); if (!p) return; const r = mapc.getBoundingClientRect();
   const nx = e.clientX - r.left, ny = e.clientY - r.top;
@@ -359,7 +440,7 @@ mapc.addEventListener('pointermove', e => {
 });
 const mapUp = e => {
   const p = ptrs.get(e.pointerId); if (!p) return; ptrs.delete(e.pointerId);
-  if (e.type === 'pointerup' && !dragged && performance.now() - p.t < 800) {
+  if (e.type === 'pointerup' && !dragged) {   // a tap = no drag (no time limit: long frames on slow phones delayed pointerup)
     if (touch && mapMode === 'mini' && playing()) setMapMode('full');   // phones: tap the minimap to expand it
     else if (state === 'Explore') {
       const w = toWorld(p.x, p.y);
@@ -370,7 +451,8 @@ const mapUp = e => {
 };
 mapc.addEventListener('pointerup', mapUp); mapc.addEventListener('pointercancel', mapUp);
 mapc.addEventListener('wheel', e => { e.preventDefault(); const r = mapc.getBoundingClientRect(); zoomAt(e.clientX - r.left, e.clientY - r.top, Math.pow(1.18, -Math.sign(e.deltaY))); }, { passive: false });
-window.pgDebug = { get state() { return state; }, get cur() { return cur; }, get P() { return P; }, toScreen: (x, y) => toScreen(x, y), get mapMode() { return mapMode; } };
+window.pgDebug = { get state() { return state; }, get cur() { return cur; }, get P() { return P; }, toScreen: (x, y) => toScreen(x, y), get mapMode() { return mapMode; }, get air() { return airOn; }, get mk() { return mk; },
+  startLoaded: () => streamer.groundAt(cur.spawn.x, cur.spawn.y, 1e4) !== null, metroTiles: () => [...streamer.tiles.values()].filter(t => t.metro).length };
 
 // ------------------------------------------------------------------ main loop
 const compassLabels = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
@@ -379,8 +461,10 @@ let last = performance.now(), frames = 0, perfT = last, roamDraw = 0;
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - last) / 1000); last = now; const st = (now - stateT) / 1000;
-  if (playing()) streamer.focus = { x: P.x, z: P.z };
+  if (playing() && !returning) streamer.focus = { x: P.x, z: P.z };
   streamer.update();
+  if (returning && playing() && streamer.readyAround(cur.spawn.x, cur.spawn.y, 60) && teleport(cur.spawn)) { returning = false; log('back to start'); }
+  metroG.enable(!!cur && cur.hints.metro && playing()); metroG.update();
   if (landmarks) landmarks.update(streamer.focus.x, streamer.focus.z);
   switch (state) {
     case 'Menu':
@@ -394,6 +478,7 @@ function frame(now) {
         log(`round ready in ${((now - loadT) / 1000).toFixed(1)}s, tiles ${streamer.loadedCount}, ${(streamer.bytes / 1024) | 0} KB so far`);
         $('hudRound').textContent = `Manche ${rounds.length}/${ROUNDS}`; $('hudScore').textContent = `Score : ${fmt(total())}`;
         setState('Explore'); resetMapView(); drawMap();
+        if (params.has('air') && spotParam && rounds.length === 1) setAir(true);   // debug: ?spot=...&air starts in the aerial view
       }
       break;
     case 'Explore':
@@ -431,7 +516,7 @@ resize();
 setState('Menu');
 requestAnimationFrame(frame);
 Promise.all([loadWorld(BASE), fetch(BASE + 'landmarks.json').then(r => r.json()).catch(() => []), fetch(BASE + 'hints.json').then(r => r.json()).catch(() => null)]).then(([, lm, hd]) => {
-  if (hd) hintData = hd;
+  if (hd) { hintData = hd; metroG.setLines(hd.lines); }
   landmarks = new Landmarks(root, lm, fogEnd); setExclusions(landmarks.exclusions());
   worldReady = true; $('play').disabled = false; $('play').textContent = 'JOUER';
   menuSpawn = World.spawns[(Math.random() * World.spawns.length) | 0];

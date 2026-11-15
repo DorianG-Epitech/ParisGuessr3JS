@@ -73,7 +73,7 @@ export class Streamer {
     t.cells = cells; t.done = true;
   }
   free(t) {
-    if (t.group) { this.root.remove(t.group); t.geos.forEach(g => g.dispose()); }
+    if (t.group) { this.root.remove(t.group); t.geos.forEach(g => g.dispose()); if (t.metro) t.metro.children.forEach(m => m.geometry.dispose()); }
     const i = this.pending.indexOf(t); if (i >= 0) this.pending.splice(i, 1);
   }
   tileAt(x, z) { return this.tiles.get(key(Math.floor(x / World.tile), Math.floor(z / World.tile))); }

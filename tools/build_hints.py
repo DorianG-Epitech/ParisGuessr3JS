@@ -7,7 +7,7 @@ Inputs: $PG_DATA/traces_reseau_ferre.geojson (download:
   https://data.iledefrance-mobilites.fr/api/explore/v2.1/catalog/datasets/traces-du-reseau-ferre-idf/exports/geojson)
   and $PG_DATA/vector/arrondissement_municipal.geojson (Lambert-93)."""
 import os, json
-import shapely.geometry as sg, shapely.ops as so
+import shapely, shapely.geometry as sg, shapely.ops as so
 from pyproj import Transformer
 
 D = os.environ.get("PG_DATA", "/workspace/parisguessr/data")
@@ -26,7 +26,7 @@ groups = {}
 for f in json.load(open(os.path.join(D, "traces_reseau_ferre.geojson")))["features"]:
     p = f["properties"]
     if p["mode"] not in ("METRO", "RER") or p["indice_lig"] == "TER": continue
-    g = so.transform(tr.transform, sg.shape(f["geometry"])).intersection(clip)
+    g = shapely.transform(sg.shape(f["geometry"]), lambda c: __import__('numpy').column_stack(tr.transform(c[:, 0], c[:, 1]))).intersection(clip)
     if g.is_empty: continue
     k = (p["mode"], p["indice_lig"]); groups.setdefault(k, {"c": p["colourweb_hexa"], "g": []})["g"].append(g)
 lines = []
@@ -38,7 +38,8 @@ arr = []
 for f in json.load(open(os.path.join(D, "vector", "arrondissement_municipal.geojson")))["features"]:
     g = sg.shape(f["geometry"]).simplify(3)
     polys = [g] if g.geom_type == "Polygon" else list(g.geoms)
-    arr.append({"a": int(f["properties"]["numero_de_l_arrondissement_municipal"]), "p": [flat(p.exterior) for p in polys]})
+    rp = sg.shape(f["geometry"]).representative_point()
+    arr.append({"a": int(f["properties"]["numero_de_l_arrondissement_municipal"]), "l": [round(rp.x - X0), round(rp.y - Y0)], "p": [flat(p.exterior) for p in polys]})
 arr.sort(key=lambda a: a["a"])
 json.dump({"lines": lines, "arr": arr}, open(OUT, "w"), separators=(",", ":"))
 print(f"{len(lines)} lines, {len(arr)} arrondissements, {os.path.getsize(OUT) / 1024:.1f} KB")

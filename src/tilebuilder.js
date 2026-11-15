@@ -8,6 +8,8 @@ const cPave = C(229, 226, 219), cGreen = C(203, 225, 186), cWater = C(178, 207, 
 // road colours = guess map (make_map.py): white streets, light yellow (importance 3), yellow (importance 1-2 / autoroutier).
 // alpha < 1 = depth pull towards the camera; majors pull a bit more so they win where they cross minor streets.
 const cRoads = [C(250, 250, 247, 26), C(255, 236, 180, 13), C(247, 213, 139, 0)];
+// each class sits on its own layer above the terrain (white < light yellow < yellow), so overlapping classes never interpenetrate
+const ROAD_DY = [0.04, 0.1, 0.16];
 const cRoadsDeck = [C(250, 250, 247), C(255, 236, 180), C(247, 213, 139)];
 const cWall = C(246, 243, 236), cRoof = C(214, 209, 201), cAttic = C(226, 221, 212), cAtticRoof = C(190, 186, 182), cDeck = C(212, 209, 203);
 // tree types: 0 rond (tilleul, érable...), 1 platane, 2 marronnier, 3 conifère, 4 élancé (peuplier, ginkgo, bouleau), 5 petit, 6 fleuri
@@ -130,10 +132,12 @@ export function buildTile(buffer) {
   // ---- roads: ribbons draped on the terrain (subdivided across), bridges at their own deck altitude
   const nroads = i32();
   for (let k = 0; k < nroads; k++) {
-    const fl = u8(), bridge = (fl & 1) !== 0, rc = (fl >> 1) & 3, w = u16() / 10, n = u16();
-    const pts = []; for (let i = 0; i < n; i++) { const x = i16() / 10, z = i16() / 10; pts.push([x, z]); }
+    const fl = u8(), bridge = (fl & 1) !== 0, rc = (fl >> 1) & 3, w = u16() / 10; let n = u16();
+    let pts = []; for (let i = 0; i < n; i++) { const x = i16() / 10, z = i16() / 10; pts.push([x, z]); }
     const zs = []; if (bridge) for (let i = 0; i < n; i++) zs.push(u16() / 100);
     if (n < 2) continue;
+    if (!bridge) pts = densify(pts, 4);   // follow the 4 m terrain grid along the road too (long straight pieces used to cut through the relief)
+    n = pts.length;
     const lat = bridge ? 1 : Math.min(Math.max(Math.ceil(w / 2.5), 1), 10);
     let prevRow = null, pl = null, pr = null;
     for (let i = 0; i < n; i++) {
@@ -146,7 +150,7 @@ export function buildTile(buffer) {
       if (bridge) { l3 = [Lx, zs[i], Lz]; r3 = [Rx, zs[i], Rz]; }
       else {
         row = [];
-        for (let j = 0; j <= lat; j++) { const t = j / lat, qx = Lx + (Rx - Lx) * t, qz = Lz + (Rz - Lz) * t; row.push([qx, ground(qx, qz) + 0.03, qz]); }
+        for (let j = 0; j <= lat; j++) { const t = j / lat, qx = Lx + (Rx - Lx) * t, qz = Lz + (Rz - Lz) * t; row.push([qx, ground(qx, qz) + ROAD_DY[rc], qz]); }
         l3 = row[0]; r3 = row[lat];
       }
       if (i > 0) {
@@ -317,6 +321,14 @@ export function buildTile(buffer) {
     origin, faces: geo(F, 'faces'), lines: geo(L, 'lines'), hull: H.p.length ? geo(H, 'hull') : null,
     col: { gn, gsp, gh, ground, walls: new Float32Array(walls), decks: new Float32Array(decks) },
   };
+}
+function densify(pts, step) {
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], n = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / step);
+    for (let k = 1; k <= n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]);
+  }
+  return out;
 }
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];

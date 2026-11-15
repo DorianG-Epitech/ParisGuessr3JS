@@ -22,13 +22,15 @@ Chaque indice est utilisable une fois par manche. Le jeu demande une confirmatio
 
 | Indice | Effet | Coût |
 |---|---|---|
-| Lignes métro/RER | trace les lignes de métro et de RER sur la carte, avec leurs couleurs (sans numéros) | −1 500 points |
+| Lignes métro/RER | trace les lignes de métro et de RER sur la carte **et au sol dans la vue 3D** (rubans colorés posés sur le relief), avec leurs couleurs officielles, sans numéros | −1 500 points |
 | Arrondissement | affiche l'arrondissement et surligne ses limites sur la carte | score ÷ 2 |
-| Prendre de la hauteur | vue aérienne à environ 115 m, on regarde autour de soi puis on revient dans la rue (bouton à bascule) | score ÷ 2 |
+| Prendre de la hauteur | vue aérienne à environ 115 m, on regarde autour de soi puis on revient dans la rue (bouton, ou **Espace** pour basculer entre la rue et la vue aérienne) | score ÷ 2 |
 
 Les coûts s'appliquent toujours dans le même ordre : d'abord −1 500 (sans descendre sous 0), puis ÷ 2 pour chaque autre indice. Exemple avec les trois : `(3 702 − 1 500) ÷ 2 ÷ 2 = 551 pts`. Le calcul est affiché sur l'écran de résultat. La vue aérienne redevient gratuite pendant la balade après la manche.
 
 ![Indices](screenshots/indices.png)
+
+![Lignes de métro au sol](screenshots/metro_sol.png)
 
 ## Contrôles
 
@@ -38,8 +40,9 @@ Les coûts s'appliquent toujours dans le même ordre : d'abord −1 500 (sans de
 | Marcher | ZQSD / WASD / flèches | joystick (moitié gauche) |
 | Courir | Maj | pousser le joystick à fond |
 | Carte | survol de la mini-carte, M pour l'agrandir | toucher la mini-carte, bouton Réduire |
-| Deviner | Espace ou Entrée, bouton Deviner | bouton Deviner |
-| Retour au départ | R | bouton Départ |
+| Deviner | Entrée, bouton Deviner | bouton Deviner |
+| Vue aérienne (indice hauteur pris) | Espace (rue ↔ hauteur) | bouton de l'indice |
+| Retour au départ | R (AZERTY ou QWERTY) | bouton Départ |
 | Zoom carte | molette, + / − | pincer, + / − |
 
 ## Rendu outlined
@@ -47,7 +50,7 @@ Les coûts s'appliquent toujours dans le même ordre : d'abord −1 500 (sans de
 - **Faces** : couleurs plates par vertex (façades, toits mansardés, trottoirs, chaussée, verdure, eau), avec un léger éclairage directionnel et un brouillard linéaire (60 à 330 m, 270 m sur mobile).
 - **Contours** : de vraies lignes à épaisseur constante en pixels. Chaque segment devient un quad étendu dans le vertex shader à partir de l'extrémité opposée, puis rapproché de la caméra pour passer devant ses faces. Les arêtes de bâtiments, les toits, les bordures de trottoir et les étages (traits fins tous les 3 m) sont dessinés ainsi.
 - **Arbres** : contour par « coque inversée », c'est-à-dire les faces arrière gonflées d'un nombre constant de pixels.
-- **Routes** : mêmes couleurs que la carte 2D. Les grands axes (importance IGN 1–2 et voies autoroutières) sont jaunes, les axes d'importance 3 sont jaune clair et les autres rues sont blanches.
+- **Routes** : mêmes couleurs que la carte 2D. Les grands axes (importance IGN 1–2 et voies autoroutières) sont jaunes, les axes d'importance 3 sont jaune clair et les autres rues sont blanches. Chaque classe est posée sur sa propre couche au-dessus du relief (blanc < jaune clair < jaune) et suit le relief tous les 4 m, donc les carrefours restent nets.
 
 ## Arbres
 
@@ -90,7 +93,7 @@ Les modèles sont chargés uniquement quand le joueur s'approche. Les plus hauts
 
 Paris est découpé en 3 073 tuiles de 250 m au format binaire `PGT2`, soit environ 12 Ko gzippés par tuile et 36,5 Mo au total. Chaque tuile contient le relief, les emprises de bâtiments avec leurs hauteurs, les routes avec leurs largeurs et leur classe de couleur, les bordures, les arbres avec leur forme et les accès au métro. Le jeu ne télécharge que les tuiles proches du joueur, dans un rayon de 420 m (340 m sur mobile). Une rue est prête en 0,2 à 0,4 s.
 
-Pour régénérer les tuiles : `python3 tools/build_tiles.py`. Le script a besoin des données brutes IGN, des arbres et des accès métro dans `$PG_DATA`, voir les scripts `fetch_*` du [repo Unity](https://github.com/DorianG-Epitech/ParisGuessr/tree/main/Tools). Les accès métro viennent des jeux IDFM `acces`, `relations-acces` et `zones-d-arrets`. Les monuments : `tools/landmarks_extract.py` extrait les emprises IGN autour de chaque monument, puis `tools/landmarks_gen.py` produit `public/data/landmarks.json`. Les indices : `tools/build_hints.py` produit `public/data/hints.json` (26 Ko, 12 Ko gzippé) à partir des tracés IDFM et des limites d'arrondissements IGN. La carte et les points de départ viennent du projet Unity (`tools/prepare_data.py`).
+Pour régénérer les tuiles : `python3 tools/build_tiles.py`. Le script a besoin des données brutes IGN, des arbres et des accès métro dans `$PG_DATA`, voir les scripts `fetch_*` du [repo Unity](https://github.com/DorianG-Epitech/ParisGuessr/tree/main/Tools). Les accès métro viennent des jeux IDFM `acces`, `relations-acces` et `zones-d-arrets`. Les monuments : `tools/landmarks_extract.py` extrait les emprises IGN autour de chaque monument, puis `tools/landmarks_gen.py` produit `public/data/landmarks.json`. Les indices : `tools/build_hints.py` produit `public/data/hints.json` (26 Ko, 12 Ko gzippé) à partir des tracés IDFM et des limites d'arrondissements IGN. La carte de base vectorielle : `tools/build_map.py` produit `public/data/map/` (209 tuiles de 1 km, binaire compact gzippé : rues avec leur largeur réelle, eau, verdure, voies ferrées, îlots ; 3,3 Mo au total plus 3,3 Mo d'emprises détaillées), chargées seulement quand on zoome. L'image de la carte vue de loin et les points de départ viennent du projet Unity (`tools/prepare_data.py`).
 
 ## Développement
 
@@ -107,7 +110,8 @@ Le code se trouve dans `src/` :
 - `streamer.js` : chargement en continu, sol et collisions ;
 - `shaders.js` : faces, lignes et coque ;
 - `landmarks.js` : monuments ;
-- `main.js` : jeu, entrées, mini-carte, indices et interface.
+- `metroground.js` : lignes de métro/RER au sol (indice) ;
+- `main.js` : jeu, entrées, mini-carte (raster de loin, tuiles vectorielles nettes de près), indices et interface.
 
 ## Crédits
 
