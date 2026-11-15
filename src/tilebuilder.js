@@ -1,12 +1,21 @@
 import * as THREE from 'three';
-// Port of TileBuilder.cs: turns a compact "PGT1" tile into faces (flat, vertex coloured), outline quads, tree hulls,
+// Port of TileBuilder.cs (+ web extras): turns a compact "PGT2" tile into faces (flat, vertex coloured), outline quads, tree hulls,
 // plus collision data (terrain grid, wall segments, bridge decks). Local frame = Unity's: x = East, y = up, z = North
 // (the scene root mirrors z so three.js stays right-handed).
 
 const C = (r, g, b, a = 255) => [r / 255, g / 255, b / 255, a / 255];
-const cPave = C(229, 226, 219), cGreen = C(203, 225, 186), cWater = C(178, 207, 231), cRoad = C(201, 201, 199, 0);
+const cPave = C(229, 226, 219), cGreen = C(203, 225, 186), cWater = C(178, 207, 231);
+// road colours = guess map (make_map.py): white streets, light yellow (importance 3), yellow (importance 1-2 / autoroutier).
+// alpha < 1 = depth pull towards the camera; majors pull a bit more so they win where they cross minor streets.
+const cRoads = [C(250, 250, 247, 26), C(255, 236, 180, 13), C(247, 213, 139, 0)];
+const cRoadsDeck = [C(250, 250, 247), C(255, 236, 180), C(247, 213, 139)];
 const cWall = C(246, 243, 236), cRoof = C(214, 209, 201), cAttic = C(226, 221, 212), cAtticRoof = C(190, 186, 182), cDeck = C(212, 209, 203);
-const cTrunk = C(160, 145, 130), cCrown = C(196, 222, 176);
+// tree types: 0 rond (tilleul, érable...), 1 platane, 2 marronnier, 3 conifère, 4 élancé (peuplier, ginkgo, bouleau), 5 petit, 6 fleuri
+const cCrowns = [C(178, 208, 150), C(196, 217, 160), C(150, 189, 131), C(124, 166, 137), C(188, 215, 146), C(201, 223, 170), C(238, 203, 214)];
+const cTrunks = [C(146, 132, 118), C(200, 192, 168), C(128, 114, 103), C(138, 116, 97), C(206, 202, 192), C(146, 132, 118), C(142, 122, 116)];
+// metro entrances
+const cHole = C(92, 94, 100, 0), cStep = C(120, 122, 128, 0), cMuret = C(214, 210, 202), cPole = C(78, 92, 86), cSign = C(244, 204, 64), cSignM = C(30, 30, 34);
+const cGuimard = C(70, 112, 88), cGPanel = C(236, 196, 104), cLamp = C(240, 140, 66);
 
 class Buf {
   constructor() { this.p = []; this.n = []; this.c = []; this.i = []; this.o = []; this.s = []; }
@@ -103,7 +112,7 @@ export function buildTile(buffer) {
   // ---- roads: ribbons draped on the terrain (subdivided across), bridges at their own deck altitude
   const nroads = i32();
   for (let k = 0; k < nroads; k++) {
-    const bridge = u8() !== 0, w = u16() / 10, n = u16();
+    const fl = u8(), bridge = (fl & 1) !== 0, rc = (fl >> 1) & 3, w = u16() / 10, n = u16();
     const pts = []; for (let i = 0; i < n; i++) { const x = i16() / 10, z = i16() / 10; pts.push([x, z]); }
     const zs = []; if (bridge) for (let i = 0; i < n; i++) zs.push(u16() / 100);
     if (n < 2) continue;
@@ -124,7 +133,7 @@ export function buildTile(buffer) {
       }
       if (i > 0) {
         if (bridge) {
-          quad(pl, l3, r3, pr, [0, 1, 0], cDeck);
+          quad(pl, l3, r3, pr, [0, 1, 0], cRoadsDeck[rc]);
           decks.push(...pl, ...l3, ...r3, ...pr);
           const dn = v => [v[0], v[1] - 1.2, v[2]], up = v => [v[0], v[1] + 1.0, v[2]];
           quad(pl, l3, dn(l3), dn(pl), [0, 1, 0], cDeck); quad(pr, r3, dn(r3), dn(pr), [0, 1, 0], cDeck);
@@ -132,7 +141,7 @@ export function buildTile(buffer) {
           quad(pl, l3, up(l3), up(pl), [0, 1, 0], cDeck); quad(pr, r3, up(r3), up(pr), [0, 1, 0], cDeck);
           line(up(pl), up(l3)); line(up(pr), up(r3));
           walls.push(pl[0], pl[2], l3[0], l3[2], Math.min(pl[1], l3[1]) - 1.2, Math.max(pl[1], l3[1]) + 1, pr[0], pr[2], r3[0], r3[2], Math.min(pr[1], r3[1]) - 1.2, Math.max(pr[1], r3[1]) + 1);
-        } else for (let j = 0; j < lat; j++) quad(prevRow[j], row[j], row[j + 1], prevRow[j + 1], [0, 1, 0], cRoad);
+        } else for (let j = 0; j < lat; j++) quad(prevRow[j], row[j], row[j + 1], prevRow[j + 1], [0, 1, 0], cRoads[rc]);
       }
       pl = l3; pr = r3; prevRow = row;
     }
@@ -148,50 +157,131 @@ export function buildTile(buffer) {
     }
   }
 
-  // ---- trees
+  // ---- trees (genus-based shapes, faceted crowns, inverted-hull outlines)
   const ntr = i32();
   for (let k = 0; k < ntr; k++) {
-    const x = i16() / 10, z = i16() / 10, h = u8() / 4;
-    const hs = (Math.imul(Math.trunc(x * 73856093), 1) ^ Math.imul(Math.trunc(z * 19349663), 1)) >>> 0;
-    tree(x, ground(x, z), z, h, (hs % 1000) / 1000);
+    const x = i16() / 10, z = i16() / 10, h = u8() / 4, ty = Math.min(u8(), 6), circ = u8() * 4, maxR = u8() / 10;
+    const hs = hash(x, z);
+    tree(x, ground(x, z), z, Math.max(h, 2.5), ty, circ, maxR, hs);
   }
 
-  function tree(px, py, pz, h, rnd) {
-    const tr = Math.min(Math.max(h * 0.012, 0.1), 0.25), th = h * 0.5;
-    const c = [[-tr, -tr], [tr, -tr], [tr, tr], [-tr, tr]];
-    for (let i = 0; i < 4; i++) {
-      const a = c[i], b = c[(i + 1) % 4], mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2, ml = Math.hypot(mx, mz);
-      quad([px + a[0], py, pz + a[1]], [px + b[0], py, pz + b[1]], [px + b[0], py + th, pz + b[1]], [px + a[0], py + th, pz + a[1]], [mx / ml, 0, mz / ml], cTrunk);
+  // ---- metro entrances (no line numbers / names)
+  const nme = i32();
+  for (let k = 0; k < nme; k++) {
+    const x = i16() / 10, z = i16() / 10, hd = u8() / 256 * Math.PI * 2, style = u8();
+    metro(x, z, hd, style);
+  }
+
+  // convex piece: flat-shaded faces + smooth inverted hull, both wound outward from centre c
+  function convex(pv, tris, c, col, withHull = true) {
+    for (let f = 0; f < tris.length; f += 3) {
+      const a = pv[tris[f]], b = pv[tris[f + 1]], e = pv[tris[f + 2]];
+      let n = norm(cross(sub(b, a), sub(e, a))); if (dot(n, sub(a, c)) < 0) n = n.map(v => -v);
+      const i = F.count; for (const v of [a, b, e]) vert(F, v[0], v[1], v[2], n[0], n[1], n[2], col); F.i.push(i, i + 1, i + 2);
     }
-    const cr = Math.min(h * (0.19 + 0.06 * rnd), 4.5), cy = py + h - cr * 1.2;
-    const rot = rnd * 6.28, cs = Math.cos(rot), sn = Math.sin(rot);
-    const P = v => { const x = v[0] * cr, y = v[1] * cr * 1.25, z = v[2] * cr; return [px + x * cs + z * sn, cy + y, pz - x * sn + z * cs]; };
-    const pv = ICO.map(P);
-    for (let f = 0; f < 20; f++) {
-      const a = pv[ICOT[f * 3]], b = pv[ICOT[f * 3 + 1]], e = pv[ICOT[f * 3 + 2]];
-      let n = cross(sub(b, a), sub(e, a)); n = norm(n); if (dot(n, sub(a, [px, cy, pz])) < 0) n = n.map(v => -v);
-      const i = F.count; for (const v of [a, b, e]) vert(F, v[0], v[1], v[2], n[0], n[1], n[2], cCrown); F.i.push(i, i + 1, i + 2);
-    }
-    // hull: crown (smooth normals) + trunk, front faces pointing outward (BackSide keeps the inner shell)
+    if (!withHull) return;
     const h0 = H.count;
-    for (const v of pv) { const n = norm(sub(v, [px, cy, pz])); H.p.push(...v); H.n.push(...n); }
-    for (let f = 0; f < 20; f++) {
-      let a = h0 + ICOT[f * 3], b = h0 + ICOT[f * 3 + 1], e = h0 + ICOT[f * 3 + 2];
-      const A = pv[a - h0], Bv = pv[b - h0], E = pv[e - h0];
-      if (dot(cross(sub(Bv, A), sub(E, A)), sub(A, [px, cy, pz])) < 0) [b, e] = [e, b];
-      H.i.push(a, b, e);
+    for (const v of pv) { H.p.push(...v); H.n.push(...norm(sub(v, c))); }
+    for (let f = 0; f < tris.length; f += 3) {
+      let a = tris[f], b = tris[f + 1], e = tris[f + 2];
+      if (dot(cross(sub(pv[b], pv[a]), sub(pv[e], pv[a])), sub(pv[a], c)) < 0) [b, e] = [e, b];
+      H.i.push(h0 + a, h0 + b, h0 + e);
     }
-    const s0 = H.count;
-    for (let i = 0; i < 4; i++) {
-      const n = norm([c[i][0], 0, c[i][1]]);
-      H.p.push(px + c[i][0], py, pz + c[i][1]); H.n.push(...n); H.p.push(px + c[i][0], py + th, pz + c[i][1]); H.n.push(...n);
+  }
+  function blob(cx, cy, cz, rx, ry, rz, rot, seed, col) {
+    const cs = Math.cos(rot), sn = Math.sin(rot);
+    const pv = ICO.map((v, i) => {
+      const j = 1 + (frac(seed * 7.13 + i * 0.618) - 0.5) * 0.26;
+      const x = v[0] * rx * j, y = v[1] * ry * j, zz = v[2] * rz * j;
+      return [cx + x * cs + zz * sn, cy + y, cz - x * sn + zz * cs];
+    });
+    convex(pv, ICOT, [cx, cy, cz], col);
+  }
+  function ring(cx, cy, cz, r, n, rot) { const out = []; for (let i = 0; i < n; i++) { const a = rot + i / n * Math.PI * 2; out.push([cx + Math.cos(a) * r, cy, cz + Math.sin(a) * r]); } return out; }
+  function cone(cx, y0, y1, cz, r, n, rot, col) {
+    const pv = [...ring(cx, y0, cz, r, n, rot), [cx, y1, cz], [cx, y0, cz]], tris = [];
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n; tris.push(i, j, n, j, i, n + 1); }
+    convex(pv, tris, [cx, y0 + (y1 - y0) * 0.3, cz], col);
+  }
+  function prism(cx, y0, y1, cz, r, n, rot, col, withHull = true, r1 = r) {
+    const pv = [...ring(cx, y0, cz, r, n, rot), ...ring(cx, y1, cz, r1, n, rot)], tris = [];
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n; tris.push(i, j, n + j, i, n + j, n + i); }
+    convex(pv, tris, [cx, (y0 + y1) / 2, cz], col, withHull);
+  }
+  function tree(px, py, pz, h, ty, circ, maxR, hs) {
+    const r1 = frac(hs * 0.000173), r2 = frac(hs * 0.000391), rot = r1 * 6.283;
+    const v = 0.93 + 0.12 * r2, cc = cCrowns[ty], col = [cc[0] * v, cc[1] * v, cc[2] * v, 1];
+    const tr = Math.min(Math.max(circ > 0 ? circ / 628 : h * 0.012, 0.07), 0.4), tc = cTrunks[ty];
+    const lim = r => Math.max(Math.min(r, maxR), 0.8);
+    let top;   // trunk top (inside the crown)
+    if (ty === 3) {          // conifère: two stacked cones
+      const r0 = lim(Math.min(0.21 * h, 4.2));
+      cone(px, py + 0.13 * h, py + 0.74 * h, pz, r0, 7, rot, col);
+      cone(px, py + 0.46 * h, py + h, pz, r0 * 0.68, 7, rot + 0.4, col);
+      top = py + 0.5 * h;
+    } else if (ty === 1) {   // platane: wide, two lobes
+      const rx = lim(Math.min(0.34 * h, 8)), ry = 0.26 * h, cy = py + h - ry, ox = Math.cos(rot) * rx * 0.36, oz = Math.sin(rot) * rx * 0.36;
+      blob(px + ox, cy, pz + oz, rx * 0.7, ry, rx * 0.66, rot, hs, col);
+      blob(px - ox, cy + ry * 0.12, pz - oz, rx * 0.66, ry * 0.92, rx * 0.62, rot + 1.1, hs + 3, col);
+      top = cy;
+    } else {
+      const P = [[0.26, 0.32, 5.5], null, [0.3, 0.39, 6.5], null, [0.1, 0.41, 2.4], [0.33, 0.3, 3.6], [0.33, 0.3, 3.6]][ty];
+      const rx = lim(Math.max(Math.min(P[0] * h, P[2]), ty === 4 ? 1.0 : 0)), ry = P[1] * h, cy = py + h - ry;
+      blob(px, cy, pz, rx, ry, rx * (0.9 + 0.2 * r2), rot, hs, col);
+      top = cy;
     }
-    for (let i = 0; i < 4; i++) {
-      const a = s0 + i * 2, b = s0 + ((i + 1) % 4) * 2;
-      const A = H.p.slice(a * 3, a * 3 + 3), Bv = H.p.slice(b * 3, b * 3 + 3), B1 = H.p.slice(b * 3 + 3, b * 3 + 6);
-      const out = [c[i][0] + c[(i + 1) % 4][0], 0, c[i][1] + c[(i + 1) % 4][1]];
-      if (dot(cross(sub(Bv, A), sub(B1, A)), out) >= 0) H.i.push(a, b, b + 1, a, b + 1, a + 1);
-      else H.i.push(a, b + 1, b, a, a + 1, b + 1);
+    prism(px, py - 0.4, top, pz, tr, 6, rot, tc, true, tr * 0.7);
+  }
+
+  function metro(cx, cz, hd, style) {
+    const dx = Math.sin(hd), dz = Math.cos(hd), qx = dz, qz = -dx;   // along / across
+    const P = (a, b) => [cx + dx * a + qx * b, cz + dz * a + qz * b];
+    const g = ground(cx, cz);
+    const at = (a, b, y) => { const p = P(a, b); return [p[0], g + y, p[1]]; };
+    const L = 2.6, W = 0.95;
+    // opening + steps (pulled like roads so it sits on the pavement)
+    quad(at(-L, -W, 0.08), at(L, -W, 0.08), at(L, W, 0.08), at(-L, W, 0.08), [0, 1, 0], cHole);
+    for (let s = -L + 0.45; s < L - 0.2; s += 0.42) line(at(s, -W, 0.09), at(s, W, 0.09), -1);
+    quad(at(-L, -W * 0.15, 0.085), at(-L + 0.2, -W * 0.15, 0.085), at(-L + 0.2, W * 0.15, 0.085), at(-L, W * 0.15, 0.085), [0, 1, 0], cStep);
+    // balustrade on three sides (open end at +L): low stone wall + rail
+    const sides = [[[L, -W], [-L, -W]], [[-L, -W], [-L, W]], [[-L, W], [L, W]]];
+    for (const [a, b] of sides) {
+      const A = P(...a), B = P(...b), ga = ground(A[0], A[1]), gb = ground(B[0], B[1]);
+      const nx = (B[1] - A[1]), nz = -(B[0] - A[0]), nl = Math.hypot(nx, nz) || 1;
+      quad([A[0], ga - 0.3, A[1]], [B[0], gb - 0.3, B[1]], [B[0], gb + 0.32, B[1]], [A[0], ga + 0.32, A[1]], [nx / nl, 0, nz / nl], style ? cGuimard : cMuret);
+      line([A[0], ga + 0.32, A[1]], [B[0], gb + 0.32, B[1]]); line([A[0], ga + 0.02, A[1]], [B[0], gb + 0.02, B[1]], -1);
+      line([A[0], ga + 1.0, A[1]], [B[0], gb + 1.0, B[1]]);
+      const len = Math.hypot(B[0] - A[0], B[1] - A[1]), np = Math.max(1, Math.round(len / 0.55));
+      for (let i = 0; i <= np; i++) { const t = i / np, x = A[0] + (B[0] - A[0]) * t, z = A[1] + (B[1] - A[1]) * t, y = ga + (gb - ga) * t; line([x, y + 0.32, z], [x, y + 1.0, z], i % 2 && i !== np ? 1 : 0); }
+      walls.push(A[0], A[1], B[0], B[1], Math.min(ga, gb) - 1, Math.max(ga, gb) + 1.05);
+    }
+    if (style === 0) {   // modern totem: pole + yellow disc with an "M" (both faces)
+      const p = P(L - 0.1, W + 0.45), gp = ground(p[0], p[1]);
+      prism(p[0], gp - 0.2, gp + 2.75, p[1], 0.06, 6, hd, cPole);
+      const cy = gp + 3.05, R = 0.42, n = 14, pts = [];
+      for (let i = 0; i < n; i++) { const a = i / n * Math.PI * 2; pts.push([p[0] + qx * Math.cos(a) * R, cy + Math.sin(a) * R, p[1] + qz * Math.cos(a) * R]); }
+      const i0 = F.count; for (const v of pts) vert(F, v[0], v[1], v[2], dx, 0, dz, cSign);
+      for (let i = 1; i < n - 1; i++) F.i.push(i0, i0 + i, i0 + i + 1);
+      for (let i = 0; i < n; i++) line(pts[i], pts[(i + 1) % n]);
+      const M = [[-0.2, -0.2], [-0.2, 0.2], [0, -0.02], [0.2, 0.2], [0.2, -0.2]];
+      for (const side of [1, -1]) for (let i = 0; i < 4; i++) {
+        const [a0, a1] = M[i], [b0, b1] = M[i + 1];
+        const ax = p[0] + qx * a0 + dx * 0.03 * side, ay = cy + a1, az = p[1] + qz * a0 + dz * 0.03 * side;
+        const bx = p[0] + qx * b0 + dx * 0.03 * side, by = cy + b1, bz = p[1] + qz * b0 + dz * 0.03 * side;
+        const ux = bx - ax, uy = by - ay, uz = bz - az, ul = Math.hypot(ux, uy, uz), wv = 0.035;
+        // perpendicular within the disc plane: (q, up) basis
+        const pa = (uy * 1) / ul, pb = -(ux * qx + uz * qz) / ul;   // rotate 90° in (across, up)
+        const ox = qx * pa * wv, oy = pb * wv, oz = qz * pa * wv;
+        quad([ax - ox, ay - oy, az - oz], [bx - ox, by - oy, bz - oz], [bx + ox, by + oy, bz + oz], [ax + ox, ay + oy, az + oz], [dx * side, 0, dz * side], cSignM);
+      }
+    } else {             // Guimard-like: two green posts with lamps and a plain panel across the open end
+      const posts = [P(L + 0.05, -W - 0.05), P(L + 0.05, W + 0.05)];
+      let gy = 0;
+      for (const p of posts) { const gp = ground(p[0], p[1]); gy = Math.max(gy, gp); prism(p[0], gp - 0.2, gp + 2.9, p[1], 0.07, 6, hd, cGuimard, true, 0.045); blob(p[0], gp + 3.05, p[1], 0.17, 0.24, 0.17, 0, 1, cLamp); }
+      const a = posts[0], b = posts[1], y0 = gy + 2.35, y1 = gy + 2.7;
+      const p0 = [a[0], y0, a[1]], p1 = [b[0], y0, b[1]], p2 = [b[0], y1, b[1]], p3 = [a[0], y1, a[1]];
+      quad(p0, p1, p2, p3, [dx, 0, dz], cGPanel); line(p0, p1); line(p1, p2); line(p2, p3); line(p3, p0);
+      line([a[0], y1 + 0.05, a[1]], [(a[0] + b[0]) / 2, y1 + 0.35, (a[1] + b[1]) / 2]); line([(a[0] + b[0]) / 2, y1 + 0.35, (a[1] + b[1]) / 2], [b[0], y1 + 0.05, b[1]]);
     }
   }
 
@@ -214,3 +304,5 @@ const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const norm = a => { const l = Math.hypot(...a) || 1; return a.map(v => v / l); };
+const frac = v => v - Math.floor(v);
+const hash = (x, z) => (Math.imul(Math.round(x * 10) | 0, 73856093) ^ Math.imul(Math.round(z * 10) | 0, 19349663)) >>> 0;

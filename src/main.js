@@ -9,6 +9,7 @@ const BASE = 'data/';
 const ROUNDS = 5;
 const params = new URLSearchParams(location.search);
 const autoDemo = params.has('autodemo');
+const spotParam = params.get('spot');   // debug: ?spot=x,z,heading[,pitch] (world metres) starts round 1 there
 const touch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 const log = (...a) => console.log('[PG]', ...a);
 
@@ -39,7 +40,7 @@ const keys = new Set();
 let joy = null, look = null;
 function teleport(s) {
   const g = streamer.groundAt(s.x, s.y, 1e4); if (g === null) return false;
-  P.x = s.x; P.z = s.y; P.y = g; P.vy = 0; P.yaw = s.heading; P.pitch = 0; return true;
+  P.x = s.x; P.z = s.y; P.y = g; P.vy = 0; P.yaw = s.heading; P.pitch = s.pitch || 0; return true;
 }
 function updatePlayer(dt) {
   let mx = 0, my = 0, run = false;
@@ -130,6 +131,7 @@ function nextRound(first) {
     s = World.spawns[(Math.random() * World.spawns.length) | 0];
     if (rounds.every(r => Math.hypot(r.spawn.x - s.x, r.spawn.y - s.y) >= 1500 && r.spawn.arr !== s.arr)) break;
   }
+  if (spotParam && first) { const v = spotParam.split(',').map(Number); s = { x: v[0], y: v[1], heading: v[2] || 0, pitch: v[3] || 0, arr: 0, street: '' }; }
   cur = { spawn: s, guess: null, dist: 0, score: 0 }; rounds.push(cur); pin = null;
   streamer.focus = { x: s.x, z: s.y }; loadT = performance.now();
   $('loadTitle').textContent = `Manche ${rounds.length}/${ROUNDS}`;

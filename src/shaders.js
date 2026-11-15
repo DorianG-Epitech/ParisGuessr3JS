@@ -15,7 +15,7 @@ export const facesMat = new THREE.ShaderMaterial({
     void main() {
       vec3 vp = (modelViewMatrix * vec4(position, 1.0)).xyz;
       float dist = length(vp);
-      float pull = (1.0 - acol.a) * (0.25 + dist * 0.006);
+      float pull = (1.0 - acol.a) * 1.12 * (0.25 + dist * 0.006);
       vp *= max(0.0, 1.0 - pull / max(dist, 0.001));
       gl_Position = projectionMatrix * vec4(vp, 1.0);
       vec3 n = normalize(mat3(modelMatrix) * normal);
